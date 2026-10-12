@@ -218,7 +218,7 @@ async function getStreams(cfg, type, id) {
   });
 
   if (cfg.limit > 0) list = list.slice(0, cfg.limit);
-  return list.map((x) => decorate(x.s, x.p));
+  return list.map((x) => x.s);
 }
 
 // ---------- configure page ----------
