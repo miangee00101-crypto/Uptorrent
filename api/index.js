@@ -40,13 +40,15 @@ function parse(s) {
   const all = `${name} ${relText}`;
   const has = (re) => re.test(all);
 
-  // resolution
-  let res = "other";
-  if (has(/2160p|4k/i)) res = "4k";
-  else if (has(/1440p/i)) res = "1440p";
-  else if (has(/1080p/i)) res = "1080p";
-  else if (has(/720p/i)) res = "720p";
-  else if (has(/480p/i)) res = "480p";
+  // resolution (Torrentio's own label in `name` is the most reliable)
+  const detectRes = (t) =>
+    /2160p|\b4k\b/i.test(t) ? "4k"
+    : /1440p/i.test(t) ? "1440p"
+    : /1080p/i.test(t) ? "1080p"
+    : /720p/i.test(t) ? "720p"
+    : /480p/i.test(t) ? "480p"
+    : "";
+  const res = detectRes(name) || detectRes(relText) || "other";
 
   // seeders + size
   const sm = /👤\s*(\d+)/.exec(raw);
@@ -174,13 +176,17 @@ async function getStreams(cfg, type, id) {
     return { s, p, res: p.res, seeders: p.seeders, size: p.size };
   });
   const found = list.length;
+  const before = list;
 
   if (cfg.resolutions.length) list = list.filter((x) => cfg.resolutions.includes(x.res));
   if (cfg.minSeeders > 0) list = list.filter((x) => x.seeders >= cfg.minSeeders);
 
   if (!list.length) {
+    const seen = {};
+    for (const x of before) seen[RES_LABEL[x.res]] = (seen[RES_LABEL[x.res]] || 0) + 1;
+    const summary = Object.entries(seen).map(([k, v]) => `${k}: ${v}`).join(", ");
     return [notice(found
-      ? `Torrentio returned ${found} streams, but none matched your resolution / seeders filters.`
+      ? `Torrentio returned ${found} streams (${summary}), but none matched your filters (resolutions: ${cfg.resolutions.join(", ") || "all"}, min seeders: ${cfg.minSeeders}).`
       : "Torrentio returned no streams for this title with your provider settings.")];
   }
 
@@ -360,25 +366,3 @@ async function handler(req, res) {
     }
     if (!parts[0] || parts[0] === "configure") return send(res, 200, PAGE, "text/html; charset=utf-8");
     if (parts[0] === "manifest.json") return send(res, 200, buildManifest(origin));
-
-    if (parts[0] === "stream") {
-      const type = parts[1];
-      const id = (parts[2] || "").replace(/\.json$/, "");
-      const streams = await getStreams(decodeConfig(cfgStr), type, id).catch(() => []);
-      return send(res, 200, { streams });
-    }
-    send(res, 404, { error: "not found" });
-  } catch (e) {
-    send(res, 500, { error: String(e) });
-  }
-}
-
-module.exports = handler;
-
-// Local dev: node api/index.js
-if (require.main === module) {
-  const PORT = process.env.PORT || 7000;
-  http.createServer(handler).listen(PORT, () =>
-    console.log(`Uptorrent running: http://127.0.0.1:${PORT}/configure`)
-  );
-}
