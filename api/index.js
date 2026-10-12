@@ -140,23 +140,49 @@ function decodeConfig(c) {
 }
 
 // ---------- core: fetch from Torrentio, filter, sort, clean ----------
+// Shown in Stremio's stream list when something goes wrong, so failures are visible
+const notice = (text) => ({
+  name: "Uptorrent\n⚠️",
+  title: text,
+  description: text,
+  externalUrl: "https://torrentio.strem.fun",
+});
+
 async function getStreams(cfg, type, id) {
   // Only https upstreams — this server fetches whatever URL is in the config.
-  if (!/^https:\/\//i.test(cfg.torrentioUrl)) return [];
+  if (!/^https:\/\//i.test(cfg.torrentioUrl)) return [notice("Torrentio URL must start with https://")];
   const base = cfg.torrentioUrl
     .replace(/\/(manifest\.json|configure)\/?$/i, "")
     .replace(/\/$/, "");
-  const r = await fetch(`${base}/stream/${type}/${encodeURIComponent(id)}.json`);
-  if (!r.ok) return [];
-  const { streams = [] } = await r.json();
+
+  let data;
+  try {
+    const r = await fetch(`${base}/stream/${type}/${encodeURIComponent(id)}.json`, {
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+    });
+    if (!r.ok) {
+      return [notice(`Torrentio answered HTTP ${r.status}. It may be blocking this server, try another Torrentio mirror URL.`)];
+    }
+    data = await r.json();
+  } catch (e) {
+    return [notice(`Could not read Torrentio's response: ${e.message}`)];
+  }
+  const streams = data.streams || [];
 
   let list = streams.map((s) => {
     const p = parse(s);
     return { s, p, res: p.res, seeders: p.seeders, size: p.size };
   });
+  const found = list.length;
 
   if (cfg.resolutions.length) list = list.filter((x) => cfg.resolutions.includes(x.res));
   if (cfg.minSeeders > 0) list = list.filter((x) => x.seeders >= cfg.minSeeders);
+
+  if (!list.length) {
+    return [notice(found
+      ? `Torrentio returned ${found} streams, but none matched your resolution / seeders filters.`
+      : "Torrentio returned no streams for this title with your provider settings.")];
+  }
 
   // Balanced score (50/50): smaller size + more seeders = higher score
   const SEED_CAP = 50;
@@ -355,4 +381,4 @@ if (require.main === module) {
   http.createServer(handler).listen(PORT, () =>
     console.log(`Uptorrent running: http://127.0.0.1:${PORT}/configure`)
   );
-        }
+}
